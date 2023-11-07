@@ -59,15 +59,9 @@ jobs:
       - name: Terraform Init
         id: init
         run:
-            TF_DATA_DIR=terraform init
-            -backend-config="key=${{ env.BACKEND_KEY }}"
-            -backend-config="bucket=${{ env.AWS_BUCKET }}"
-            -backend-config="region=${{ env.AWS_REGION }}"
+            terraform init
       
       - name: Terraform Plan
         id: plan
         run:
-            TF_DATA_DIR=terraform plan
-              -no-color
-              -var="service_name=${{ env.SERVICE_NAME }}"
-              -var-file=datalake/terraform.tfvars
+            terraform plan
