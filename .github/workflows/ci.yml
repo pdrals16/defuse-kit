@@ -12,7 +12,7 @@ concurrency:
 
 env:
   PYTHON_VERSION: "3.9"
-  AWS_REGION : <"us-east-2"> 
+  AWS_REGION : "us-east-2"
   TERRAFORM_VERSION : "1.6.2"
   AWS_BUCKET : "terraform-backend-defuse-kit"
   BACKEND_KEY : "state.tfstate"
