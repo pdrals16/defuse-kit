@@ -31,7 +31,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
 
-      - name: configure aws credentials
+      - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v1.7.0
         with:
           role-to-assume: arn:aws:iam::814537535901:role/GitHubAction-AssumeRoleWithAction
@@ -40,4 +40,32 @@ jobs:
 
       - name: Sts GetCallerIdentity
         run: |
-          aws sts get-caller-identity 
+          aws sts get-caller-identity
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v1
+        with:
+            terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Terraform Format
+        id: fmt
+        run: terraform fmt -check datalake/
+        continue-on-error: true
+
+      - name: Terraform Init
+        id: init
+        run:
+            TF_DATA_DIR=datalake/.terraform terraform init
+            -backend-config="key=${{ env.BACKEND_KEY }}"
+            -backend-config="bucket=${{ env.AWS_BUCKET }}"
+            -backend-config="region=${{ env.AWS_REGION }}"
+            datalake/
+      
+      - name: Terraform Plan
+        id: plan
+        run:
+            TF_DATA_DIR=datalake/.terraform terraform plan
+              -no-color
+              -var="service_name=${{ env.SERVICE_NAME }}"
+              -var-file=datalake/terraform.tfvars
+              datalake/
