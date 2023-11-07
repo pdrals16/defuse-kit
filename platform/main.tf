@@ -174,30 +174,9 @@ module "lambda_function_webcrawler_condor" {
 
 
 # Airbyte 
-resource "aws_iam_user" "airbyte_user" {
-  name = "airbyte_user"
-}
-
-resource "aws_iam_access_key" "airbyte_user" {
-  user = aws_iam_user.airbyte_user.name
-}
-
-data "aws_iam_policy_document" "airbyte_user" {
-  statement {
-    sid = "1"
-    actions = [
-      "s3:*",
-    ]
-    resources = [
-      "arn:aws:s3:::*",
-    ]
-  }
-}
-
-resource "aws_iam_user_policy" "airbyte_user" {
-  name   = "airbyte_user"
-  user   = aws_iam_user.airbyte_user.name
-  policy = data.aws_iam_policy_document.airbyte_user.json
+module "airbyte_google_sheets" {
+  source = "./modules/airbyte"
+  target_bucket_name = aws_s3_bucket.brass-bucket.bucket
 }
 
 # Transactional Database
