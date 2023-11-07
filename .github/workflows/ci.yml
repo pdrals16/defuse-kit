@@ -17,6 +17,7 @@ env:
   AWS_BUCKET : "terraform-backend-defuse-kit"
   BACKEND_KEY : "state.tfstate"
   SERVICE_NAME : "defuse-kit"
+  WORKING_DIR: ./platform
 
 permissions:
       id-token: write   # This is required for requesting the JWT
@@ -24,9 +25,12 @@ permissions:
 
 jobs:
   CI:
-    name: "Okay to Merge"
+    name: "Terraform Plan"
     timeout-minutes: 30
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ env.WORKING_DIR }}
 
     steps:
       - uses: actions/checkout@v2
@@ -49,23 +53,21 @@ jobs:
 
       - name: Terraform Format
         id: fmt
-        run: terraform fmt -check datalake/
+        run: terraform fmt -check .
         continue-on-error: true
 
       - name: Terraform Init
         id: init
         run:
-            TF_DATA_DIR=datalake/.terraform terraform init
+            TF_DATA_DIR=terraform init
             -backend-config="key=${{ env.BACKEND_KEY }}"
             -backend-config="bucket=${{ env.AWS_BUCKET }}"
             -backend-config="region=${{ env.AWS_REGION }}"
-            datalake/
       
       - name: Terraform Plan
         id: plan
         run:
-            TF_DATA_DIR=datalake/.terraform terraform plan
+            TF_DATA_DIR=terraform plan
               -no-color
               -var="service_name=${{ env.SERVICE_NAME }}"
               -var-file=datalake/terraform.tfvars
-              datalake/
