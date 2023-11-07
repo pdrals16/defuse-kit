@@ -43,6 +43,14 @@ locals {
   aws_account_id                   = data.aws_caller_identity.current.account_id
 }
 
+terraform {
+  backend "s3" {
+    bucket                  = "terraform-backend-defuse-kit"
+    key                     = "state.tfstate"
+    region                  = "us-east-2"
+  }
+}
+
 # VPC 
 data "aws_vpc" "selected" {
   default = true
