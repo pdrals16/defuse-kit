@@ -13,7 +13,7 @@ data "aws_iam_policy_document" "airbyte_user" {
       "s3:*",
     ]
     resources = [
-      "arn:aws:s3:::${target_bucket_name}/*",
+      "arn:aws:s3:::${var.target_bucket_name}/*",
     ]
   }
 }
