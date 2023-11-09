@@ -367,151 +367,14 @@ module "lambda_function_insert_fake_data" {
 }
 
 # CDC DMS
-data "aws_iam_policy_document" "dms_assume_role" {
-  statement {
-    actions = ["sts:AssumeRole"]
-
-    principals {
-      identifiers = ["dms.amazonaws.com"]
-      type        = "Service"
-    }
-  }
-}
-
-resource "aws_iam_role" "dms-access-for-endpoint" {
-  assume_role_policy = data.aws_iam_policy_document.dms_assume_role.json
-  name               = "dms-access-for-endpoint"
-}
-
-resource "aws_iam_role_policy_attachment" "dms-access-for-endpoint-AmazonDMSRedshiftS3Role" {
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonDMSRedshiftS3Role"
-  role       = aws_iam_role.dms-access-for-endpoint.name
-}
-
-resource "aws_iam_role" "dms-cloudwatch-logs-role" {
-  assume_role_policy = data.aws_iam_policy_document.dms_assume_role.json
-  name               = "dms-cloudwatch-logs-role"
-}
-
-resource "aws_iam_role_policy_attachment" "dms-cloudwatch-logs-role-AmazonDMSCloudWatchLogsRole" {
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonDMSCloudWatchLogsRole"
-  role       = aws_iam_role.dms-cloudwatch-logs-role.name
-}
-
-resource "aws_iam_role" "dms-vpc-role" {
-  assume_role_policy = data.aws_iam_policy_document.dms_assume_role.json
-  name               = "dms-vpc-role"
-}
-
-resource "aws_iam_role_policy_attachment" "dms-vpc-role-AmazonDMSVPCManagementRole" {
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonDMSVPCManagementRole"
-  role       = aws_iam_role.dms-vpc-role.name
-}
-
-resource "aws_security_group" "dms_sg" {
-  name        = "dms_sg"
-  description = "Allow DMS Access to Transactional Database"
-  timeouts {
-    delete = "2m"
-  }
-}
-
-resource "aws_vpc_security_group_ingress_rule" "dms_ingress" {
-  security_group_id            = aws_security_group.transactional_database_sg.id
-  description                  = "Access Postgres from DMS"
-  ip_protocol                  = "-1"
-  referenced_security_group_id = aws_security_group.dms_sg.id
-}
-
-resource "aws_vpc_security_group_egress_rule" "dms_egress_to_db" {
-  security_group_id            = aws_security_group.dms_sg.id
-  description                  = "Access to Transactional Postgres Database"
-  ip_protocol                  = "-1"
-  referenced_security_group_id = aws_security_group.transactional_database_sg.id
-}
-
-resource "time_sleep" "wait_20_seconds" {
-  # sleeping due to the fact that it needs
-  # some time after the creation of the roles
-  # for the dms replication instance to be
-  # ready for use.
-  create_duration = "20s"
-}
-
-resource "aws_dms_replication_instance" "dms_default_instance" {
-  allocated_storage           = 5
-  engine_version              = "3.5.1"
-  multi_az                    = false
-  replication_instance_class  = "dms.t2.micro"
-  replication_instance_id     = "dms-default-instance"
-  allow_major_version_upgrade = true
-
-  vpc_security_group_ids = [
-    aws_security_group.dms_sg.id
-  ]
-
-  depends_on = [
-    aws_iam_role_policy_attachment.dms-access-for-endpoint-AmazonDMSRedshiftS3Role,
-    aws_iam_role_policy_attachment.dms-cloudwatch-logs-role-AmazonDMSCloudWatchLogsRole,
-    aws_iam_role_policy_attachment.dms-vpc-role-AmazonDMSVPCManagementRole,
-    time_sleep.wait_20_seconds
-  ]
-}
-
-resource "aws_iam_role" "s3_dms_target_role" {
-  name = "s3_dms_target_role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "dms.amazonaws.com"
-        }
-      },
-    ]
-  })
-
-  inline_policy {
-    name = "allow_s3_access"
-
-    policy = jsonencode({
-      Version = "2012-10-17"
-      Statement = [
-        {
-          Effect = "Allow"
-          Action = ["s3:PutObject",
-            "s3:GetBucketLocation",
-            "s3:GetObject",
-            "s3:ListBucket",
-            "s3:DeleteObject",
-          "s3:PutObjectTagging"]
-          Resource = ["arn:aws:s3:::${aws_s3_bucket.brass-bucket.bucket}",
-          "arn:aws:s3:::${aws_s3_bucket.brass-bucket.bucket}/*"]
-        }
-      ]
-    })
-  }
-}
-
-resource "aws_dms_s3_endpoint" "s3_datalake_transactional" {
-  endpoint_id             = "s3-datalake"
-  endpoint_type           = "target"
-  data_format             = "csv"
-  bucket_folder           = "dms"
-  bucket_name             = aws_s3_bucket.brass-bucket.bucket
-  compression_type        = "GZIP"
-  csv_delimiter           = ","
-  csv_row_delimiter       = "\n"
-  rfc_4180                = true
-  add_column_name         = true
-  service_access_role_arn = aws_iam_role.s3_dms_target_role.arn
+module "aws_dms_replication_instance" {
+  source = "./modules/dms/replication_instance"
+  replication_instance_name = "replication-instance-defuse-kit"
+  postgres_database_sg_id = aws_security_group.transactional_database_sg.id
 }
 
 resource "aws_dms_endpoint" "rds_transactional" {
-  endpoint_id                 = "rds-transactional"
+  endpoint_id                 = "rds-postgres"
   endpoint_type               = "source"
   engine_name                 = "postgres"
   # extra_connection_attributes = "PluginName=PGLOGICAL"
@@ -522,9 +385,18 @@ resource "aws_dms_endpoint" "rds_transactional" {
   password                    = local.transactional_root_password
 }
 
+module "dms_transaction_endpoint_s3" {
+  source = "./modules/dms/s3_endpoint"
+  endpoint_name = "transaction"
+  target_bucket_name = aws_s3_bucket.brass-bucket.bucket
+  dms_security_group_id = module.aws_dms_replication_instance.dms_security_group_id
+  aws_vpc_id = data.aws_vpc.selected.id
+}
+
+# DMS Tasks
 resource "aws_dms_replication_task" "transactional_database_to_datalake" {
   migration_type           = "full-load-and-cdc"
-  replication_instance_arn = aws_dms_replication_instance.dms_default_instance.replication_instance_arn
+  replication_instance_arn = module.aws_dms_replication_instance.dms_replication_instance_arn
   replication_task_id      = "transactional-database-to-datalake"
   replication_task_settings = jsonencode({
     Logging : {
@@ -622,47 +494,9 @@ resource "aws_dms_replication_task" "transactional_database_to_datalake" {
       "rule-action" = "include"
     }] }
   )
-  target_endpoint_arn = aws_dms_s3_endpoint.s3_datalake_transactional.endpoint_arn
+  target_endpoint_arn = module.dms_transaction_endpoint_s3.dms_s3_endpoint_arn
   
-  ## For time saving purposes, and in order to not store
-  ## the complete replication task settings here
-  ## I end up ignoring this argument changes
-  ## For more info consult here:
-  ## https://github.com/hashicorp/terraform-provider-aws/issues/1513
   lifecycle {
     ignore_changes = [replication_task_settings]
   }
-}
-
-# Para não precisar usar o NAT Gateway e conseguir acessar o S3 que está fora da VPC
-resource "aws_vpc_endpoint" "private_s3" {
-  vpc_id            = data.aws_vpc.selected.id
-  service_name      = "com.amazonaws.us-east-2.s3"
-  vpc_endpoint_type = "Gateway"
-
-  tags = {
-    Name = "s3-endpoint"
-  }
-}
-
-data "aws_route_tables" "rts" {
-  vpc_id = data.aws_vpc.selected.id
-  filter {
-    name   = "association.main"
-    values = [true]
-  }
-}
-
-resource "aws_vpc_endpoint_route_table_association" "private_s3" {
-  vpc_endpoint_id = aws_vpc_endpoint.private_s3.id
-  route_table_id  = element(data.aws_route_tables.rts.ids, 1)
-}
-
-resource "aws_vpc_security_group_egress_rule" "dms_egress_to_s3" {
-  security_group_id = aws_security_group.dms_sg.id
-  description       = "Access to S3 from VPN"
-  ip_protocol       = "TCP"
-  from_port         = 443
-  to_port           = 443
-  prefix_list_id    = aws_vpc_endpoint.private_s3.prefix_list_id
 }
