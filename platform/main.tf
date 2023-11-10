@@ -43,6 +43,7 @@ locals {
   aws_account_id                   = data.aws_caller_identity.current.account_id
 }
 
+# Configure state.tfstate backend
 terraform {
   backend "s3" {
     bucket                  = "terraform-backend-defuse-kit"
@@ -63,41 +64,15 @@ data "aws_subnets" "all" {
   }
 }
 
-# Brass Bucket
-resource "aws_s3_bucket" "brass-bucket" {
-  bucket = "brass-bucket-defuse-kit"
-
-  tags = {
-    Name        = "Project Defuse Kit Brass Bucket"
-    Environment = "Prod"
-  }
+# S3 Buckets
+module "brass_bucket" {
+  source = "./modules/s3"
+  bucket_name = "brass"
 }
 
-resource "aws_s3_bucket_public_access_block" "brass-bucket" {
-  bucket = aws_s3_bucket.brass-bucket.id
-
-  block_public_acls       = true
-  block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
-}
-
-resource "aws_s3_bucket" "bronze-bucket" {
-  bucket = "bronze-bucket-defuse-kit"
-
-  tags = {
-    Name        = "Project Defuse Kit Bronze Bucket"
-    Environment = "Prod"
-  }
-}
-
-resource "aws_s3_bucket_public_access_block" "bronze-bucket" {
-  bucket = aws_s3_bucket.bronze-bucket.id
-
-  block_public_acls       = true
-  block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
+module "bronze_bucket" {
+  source = "./modules/s3"
+  bucket_name = "bronze"
 }
 
 # ECR - WebCrawler e FakeData
@@ -119,7 +94,7 @@ module "docker_image_webcrawler_condor" {
   create_ecr_repo = true
   ecr_repo        = "repo_webcrawler_condor"
   image_tag       = "1.0"
-  source_path     = "../crawler/"
+  source_path     = "../src/crawler/"
 }
 
 module "docker_image_insert_fake_data" {
@@ -129,7 +104,7 @@ module "docker_image_insert_fake_data" {
   create_ecr_repo = true
   ecr_repo        = "repo_insert_fake_data"
   image_tag       = "1.0"
-  source_path     = "../transactional_database/"
+  source_path     = "../src/transactional_database/"
 }
 
 # Lambda Web Crawler
@@ -176,7 +151,7 @@ module "lambda_function_webcrawler_condor" {
 # Airbyte 
 module "airbyte_google_sheets" {
   source = "./modules/airbyte"
-  target_bucket_name = aws_s3_bucket.brass-bucket.bucket
+  target_bucket_name = module.brass_bucket.bucket_name
 }
 
 # RDS Postgres Transactional
@@ -304,7 +279,7 @@ resource "aws_dms_endpoint" "rds_transactional" {
 module "dms_transaction_endpoint_s3" {
   source = "./modules/dms/s3_endpoint"
   endpoint_name = "transaction"
-  target_bucket_name = aws_s3_bucket.brass-bucket.bucket
+  target_bucket_name = module.brass_bucket.bucket_name
   dms_security_group_id = module.aws_dms_replication_instance.dms_security_group_id
   aws_vpc_id = data.aws_vpc.selected.id
 }
