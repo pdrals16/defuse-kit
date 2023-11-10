@@ -179,17 +179,7 @@ module "airbyte_google_sheets" {
   target_bucket_name = aws_s3_bucket.brass-bucket.bucket
 }
 
-# Transactional Database
-locals {
-  my_public_ip                     = sensitive(chomp(data.http.my_public_ip.response_body))
-  transactional_database           = "transactional"
-  transactional_root_user          = "postgres"
-  transactional_root_password      = random_password.postgres_transactional_root_password.result
-  transactional_fake_data_user     = "fake_data_app"
-  transactional_fake_data_password = random_password.postgres_transactional_fake_data_password.result
-  module_path                      = abspath(path.module)
-}
-
+# RDS Postgres Transactional
 resource "random_password" "postgres_transactional_root_password" {
   length           = 16
   special          = true
@@ -206,98 +196,24 @@ data "http" "my_public_ip" {
   url = "http://ipv4.icanhazip.com"
 }
 
-resource "aws_security_group" "transactional_database_sg" {
-  name        = "transactional_database_sg"
-  description = "Allow access by my Public IP Address and AWS Lambda"
+locals {
+  my_public_ip                     = sensitive(chomp(data.http.my_public_ip.response_body))
+  transactional_database           = "transactional"
+  transactional_root_user          = "postgres"
+  transactional_root_password      = random_password.postgres_transactional_root_password.result
+  transactional_fake_data_user     = "fake_data_app"
+  transactional_fake_data_password = random_password.postgres_transactional_fake_data_password.result
+  module_path                      = abspath(path.module)
 }
 
-resource "aws_vpc_security_group_ingress_rule" "my_public_ip" {
-  security_group_id = aws_security_group.transactional_database_sg.id
-  description       = "Access Postgres from my public IP"
-  from_port         = 5432
-  to_port           = 5432
-  ip_protocol       = "tcp"
-  cidr_ipv4         = "${local.my_public_ip}/32"
-}
-
-resource "aws_db_parameter_group" "transactional" {
-  name        = "transactional-database"
-  family      = "postgres15"
-  description = "Transactional Database Replication Parameter Group"
-
-  # AWS DMS config
-  parameter {
-    name         = "log_min_duration_statement"
-    value        = "10000"
-    apply_method = "pending-reboot"
-  }
-
-  parameter {
-    name         = "log_statement"
-    value        = "ddl"
-    apply_method = "pending-reboot"
-  }
-
-  parameter {
-    name         = "rds.logical_replication"
-    value        = "1"
-    apply_method = "pending-reboot"
-  }
-
-  parameter {
-    name         = "wal_sender_timeout"
-    value        = "0"
-    apply_method = "pending-reboot"
-  }
-
-  parameter {
-    name         = "rds.force_ssl"
-    value        = "0"
-    apply_method = "pending-reboot"
-  }
-}
-
-resource "aws_db_instance" "transactional" {
-  #tfsec:aws-rds-encrypt-instance-storage-data
-  # Não estamos criptografando storage por questões de custo
-  # mas em produção isso deveria ser feito.
-  allocated_storage       = 20
-  db_name                 = local.transactional_database
-  identifier              = "transactional"
-  multi_az                = false
-  engine                  = "postgres"
-  engine_version          = "15.3"
-  parameter_group_name    = aws_db_parameter_group.transactional.id
-  instance_class          = "db.t3.micro"
-  username                = local.transactional_root_user
-  password                = local.transactional_root_password
-  storage_type            = "gp2"
-  backup_retention_period = 0
-  publicly_accessible     = true #tfsec:ignore:aws-rds-no-public-db-access
-  # Posteriormente foi colocado um security group
-  # para permitir acesso apenas do meu IP público.
-  skip_final_snapshot    = true
-  vpc_security_group_ids = [aws_security_group.transactional_database_sg.id]
-}
-
-resource "null_resource" "transactional_database_setup" {
-  depends_on = [aws_db_instance.transactional]
-  provisioner "local-exec" {
-    command = "psql -h ${aws_db_instance.transactional.address} -p ${aws_db_instance.transactional.port} -U ${local.transactional_root_user} -d transactional -f ../transactional_database/prepare_database/terraform_prepare_database.sql -v user=${local.transactional_fake_data_user} -v password='${local.transactional_fake_data_password}'"
-    environment = {
-      PGPASSWORD = local.transactional_root_password
-    }
-  }
-}
-
-resource "null_resource" "transactional_replication_setup" {
-  # runs after database and security group providing external access is created
-  provisioner "local-exec" {
-    command = "psql -h ${aws_db_instance.transactional.address} -p ${aws_db_instance.transactional.port} -U ${local.transactional_root_user} -d transactional -f ${path.module}/configure_replication.sql -v user=${local.transactional_fake_data_user} -v password='${local.transactional_fake_data_user}'"
-    environment = {
-      PGPASSWORD = local.transactional_root_password
-    }
-  }
+module "rds_postgres_transaction" {
+  source = "./modules/rds/postgres"
+  my_public_ip = local.my_public_ip
+  postgres_database = local.transactional_database
+  postgres_root_user = local.transactional_root_user
+  postgres_root_password = local.transactional_root_password
+  postgres_first_user = local.transactional_fake_data_user
+  postgres_first_user_password = local.transactional_fake_data_password
 }
 
 # Lambda Fake Data
@@ -330,11 +246,11 @@ resource "aws_vpc_security_group_egress_rule" "lambda_insert_fake_data_egress" {
   security_group_id            = aws_security_group.insert_fake_data_sg.id
   description                  = "Access Transactional Postgres Database"
   ip_protocol                  = "-1"
-  referenced_security_group_id = aws_security_group.transactional_database_sg.id
+  referenced_security_group_id = module.rds_postgres_transaction.rds_database_sg_id
 }
 
 resource "aws_vpc_security_group_ingress_rule" "lambda_insert_fake_data" {
-  security_group_id            = aws_security_group.transactional_database_sg.id
+  security_group_id            = module.rds_postgres_transaction.rds_database_sg_id
   description                  = "Access Postgres from Lambda Insert Fake Data"
   ip_protocol                  = "-1"
   referenced_security_group_id = aws_security_group.insert_fake_data_sg.id
@@ -343,7 +259,7 @@ resource "aws_vpc_security_group_ingress_rule" "lambda_insert_fake_data" {
 module "lambda_function_insert_fake_data" {
   source     = "terraform-aws-modules/lambda/aws"
   version    = "~> 6.0.0"
-  depends_on = [null_resource.transactional_database_setup]
+  depends_on = [module.rds_postgres_transaction]
 
   function_name  = "insert_fake_data"
   create_package = false
@@ -357,9 +273,9 @@ module "lambda_function_insert_fake_data" {
   environment_variables = {
     postgres_app_username = local.transactional_fake_data_user
     postgres_app_password = local.transactional_fake_data_password
-    postgres_host         = aws_db_instance.transactional.address
+    postgres_host         = module.rds_postgres_transaction.rds_database_instance_address
     postgres_database     = local.transactional_database
-    postgres_port         = aws_db_instance.transactional.port
+    postgres_port         = module.rds_postgres_transaction.rds_database_instance_port
   }
 
   vpc_subnet_ids         = data.aws_subnets.all.ids
@@ -370,7 +286,7 @@ module "lambda_function_insert_fake_data" {
 module "aws_dms_replication_instance" {
   source = "./modules/dms/replication_instance"
   replication_instance_name = "replication-instance-defuse-kit"
-  postgres_database_sg_id = aws_security_group.transactional_database_sg.id
+  postgres_database_sg_id = module.rds_postgres_transaction.rds_database_sg_id
 }
 
 resource "aws_dms_endpoint" "rds_transactional" {
@@ -378,9 +294,9 @@ resource "aws_dms_endpoint" "rds_transactional" {
   endpoint_type               = "source"
   engine_name                 = "postgres"
   # extra_connection_attributes = "PluginName=PGLOGICAL"
-  server_name                 = aws_db_instance.transactional.address
+  server_name                 = module.rds_postgres_transaction.rds_database_instance_address
   database_name               = local.transactional_database
-  port                        = aws_db_instance.transactional.port
+  port                        = module.rds_postgres_transaction.rds_database_instance_port
   username                    = local.transactional_root_user
   password                    = local.transactional_root_password
 }
