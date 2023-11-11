@@ -70,7 +70,7 @@ resource "aws_db_instance" "rds_postgres" {
 resource "null_resource" "postgres_database_setup" {
   depends_on = [aws_db_instance.rds_postgres]
   provisioner "local-exec" {
-    command = "psql -h ${aws_db_instance.rds_postgres.address} -p ${aws_db_instance.rds_postgres.port} -U ${var.postgres_root_user} -d ${var.postgres_database} -f ./src/transactional_database/prepare_database/terraform_prepare_database.sql -v user=${var.postgres_first_user} -v password='${var.postgres_first_user_password}'"
+    command = "psql -h ${aws_db_instance.rds_postgres.address} -p ${aws_db_instance.rds_postgres.port} -U ${var.postgres_root_user} -d ${var.postgres_database} -f ./../src/transactional_database/prepare_database/terraform_prepare_database.sql -v user=${var.postgres_first_user} -v password='${var.postgres_first_user_password}'"
     environment = {
       PGPASSWORD = var.postgres_root_password
     }
