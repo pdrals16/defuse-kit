@@ -16,7 +16,7 @@ resource "aws_iam_role" "glue_role" {
   managed_policy_arns = ["arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole"]
 }
 
-resource "aws_iam_policy" "glue_s3" {
+resource "aws_iam_policy" "glue_s3_bucket" {
   policy      = <<-EOF
 {
     "Version": "2012-10-17",
@@ -28,7 +28,7 @@ resource "aws_iam_policy" "glue_s3" {
                 "s3:PutObject"
             ],
             "Resource": [
-                "arn:aws:s3:::${var.bucket_name}"
+                "arn:aws:s3:::${var.bucket_name}/*"
             ]
         }
     ]
@@ -38,7 +38,7 @@ EOF
 
 resource "aws_iam_role_policy_attachment" "glue_s3" {
   role       = aws_iam_role.glue_role.name
-  policy_arn = aws_iam_policy.glue_s3.arn
+  policy_arn = aws_iam_policy.glue_s3_bucket.arn
 }
 
 
