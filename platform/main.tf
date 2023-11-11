@@ -75,6 +75,49 @@ module "bronze_bucket" {
   bucket_name = "bronze"
 }
 
+# Airbyte 
+module "airbyte_google_sheets" {
+  source = "./modules/airbyte"
+  target_bucket_name = module.brass_bucket.bucket_name
+}
+
+# RDS Postgres Transactional
+resource "random_password" "postgres_transactional_root_password" {
+  length           = 16
+  special          = true
+  override_special = "!$-<>:"
+}
+
+resource "random_password" "postgres_transactional_fake_data_password" {
+  length           = 16
+  special          = true
+  override_special = "!$-<>:"
+}
+
+data "http" "my_public_ip" {
+  url = "http://ipv4.icanhazip.com"
+}
+
+locals {
+  my_public_ip                     = sensitive(chomp(data.http.my_public_ip.response_body))
+  transactional_database           = "transactional"
+  transactional_root_user          = "postgres"
+  transactional_root_password      = random_password.postgres_transactional_root_password.result
+  transactional_fake_data_user     = "fake_data_app"
+  transactional_fake_data_password = random_password.postgres_transactional_fake_data_password.result
+  module_path                      = abspath(path.module)
+}
+
+module "rds_postgres_transaction" {
+  source = "./modules/rds/postgres"
+  my_public_ip = local.my_public_ip
+  postgres_database = local.transactional_database
+  postgres_root_user = local.transactional_root_user
+  postgres_root_password = local.transactional_root_password
+  postgres_first_user = local.transactional_fake_data_user
+  postgres_first_user_password = local.transactional_fake_data_password
+}
+
 # ECR - WebCrawler e FakeData
 data "aws_ecr_authorization_token" "token" {
 }
@@ -145,50 +188,6 @@ module "lambda_function_webcrawler_condor" {
   memory_size   = 3008
   timeout       = 60
   vpc_subnet_ids         = data.aws_subnets.all.ids
-}
-
-
-# Airbyte 
-module "airbyte_google_sheets" {
-  source = "./modules/airbyte"
-  target_bucket_name = module.brass_bucket.bucket_name
-}
-
-# RDS Postgres Transactional
-resource "random_password" "postgres_transactional_root_password" {
-  length           = 16
-  special          = true
-  override_special = "!$-<>:"
-}
-
-resource "random_password" "postgres_transactional_fake_data_password" {
-  length           = 16
-  special          = true
-  override_special = "!$-<>:"
-}
-
-data "http" "my_public_ip" {
-  url = "http://ipv4.icanhazip.com"
-}
-
-locals {
-  my_public_ip                     = sensitive(chomp(data.http.my_public_ip.response_body))
-  transactional_database           = "transactional"
-  transactional_root_user          = "postgres"
-  transactional_root_password      = random_password.postgres_transactional_root_password.result
-  transactional_fake_data_user     = "fake_data_app"
-  transactional_fake_data_password = random_password.postgres_transactional_fake_data_password.result
-  module_path                      = abspath(path.module)
-}
-
-module "rds_postgres_transaction" {
-  source = "./modules/rds/postgres"
-  my_public_ip = local.my_public_ip
-  postgres_database = local.transactional_database
-  postgres_root_user = local.transactional_root_user
-  postgres_root_password = local.transactional_root_password
-  postgres_first_user = local.transactional_fake_data_user
-  postgres_first_user_password = local.transactional_fake_data_password
 }
 
 # Lambda Fake Data
@@ -278,7 +277,7 @@ resource "aws_dms_endpoint" "rds_transactional" {
 
 module "dms_transaction_endpoint_s3" {
   source = "./modules/dms/s3_endpoint"
-  endpoint_name = "transaction"
+  endpoint_name = "transactional"
   target_bucket_name = module.brass_bucket.bucket_name
   dms_security_group_id = module.aws_dms_replication_instance.dms_security_group_id
   aws_vpc_id = data.aws_vpc.selected.id
@@ -390,4 +389,12 @@ resource "aws_dms_replication_task" "transactional_database_to_datalake" {
   lifecycle {
     ignore_changes = [replication_task_settings]
   }
+}
+
+# Glue Database and Crawler 
+
+module "glue_transactional" {
+  source = "./modules/glue"
+  bucket_name = module.brass_bucket.bucket_name
+  glue_database_name = "transactional"
 }
